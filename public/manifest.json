@@ -1,0 +1,21 @@
+{
+  "name": "자세 교정 알리미",
+  "short_name": "자세알리미",
+  "description": "AI 기반 실시간 자세 모니터링 앱",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0F172A",
+  "theme_color": "#6366F1",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["health", "lifestyle", "productivity"],
+  "lang": "ko",
+  "dir": "ltr"
+}
