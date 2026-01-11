@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { PoseLandmarker, FilesetResolver } from '@mediapipe/tasks-vision';
+import { usePWAInstall } from './hooks';
+import { InstallPrompt } from './components';
 import './App.css';
 
 // 런타임 보호 (개발자 도구 감지)
@@ -13,6 +15,7 @@ import './App.css';
   // 디버거 감지
   const _0x3 = () => {
     const start = performance.now();
+    // eslint-disable-next-line no-debugger
     debugger;
     if (performance.now() - start > 100) {
       document.body.innerHTML = '';
@@ -131,10 +134,12 @@ function App() {
   const ctxRef = useRef(null); // 캔버스 컨텍스트 캐싱
   const lastStatusRef = useRef('good'); // 상태 변경 시에만 업데이트
   const lastIssuesStrRef = useRef(''); // 이슈 변경 시에만 업데이트
+  const detectLoopRef = useRef(null); // 감지 루프 함수 참조
 
   const [appState, setAppState] = useState('loading');
   const [isLoading, setIsLoading] = useState(true);
   const [loadingProgress, setLoadingProgress] = useState('AI 모델 로딩 중...');
+  const [cameraError, setCameraError] = useState(null);
   const [cameraReady, setCameraReady] = useState(false);
   const [calibratedPose, setCalibratedPose] = useState(null);
   const [postureStatus, setPostureStatus] = useState('good');
@@ -159,20 +164,24 @@ function App() {
   const [showStats, setShowStats] = useState(false);
   const [dailyGoal, setDailyGoal] = useState(80); // 목표 퍼센트
   const [breakInterval, setBreakInterval] = useState(30); // 분 단위
-  const [lastBreakTime, setLastBreakTime] = useState(null);
+  const [, setLastBreakTime] = useState(null);
   const [showBreakReminder, setShowBreakReminder] = useState(false);
   const [theme, setTheme] = useState('dark'); // 'dark' or 'light'
   const [alertSound, setAlertSound] = useState('beep'); // 'beep', 'chime', 'bell'
   const [alertVolume, setAlertVolume] = useState(0.5);
   const [showFullSettings, setShowFullSettings] = useState(false);
-  const [isPaused, setIsPaused] = useState(false);
+  const [, setIsPaused] = useState(false);
   const breakTimerRef = useRef(null);
   const sessionStartTimeRef = useRef(null);
+
+  // PWA 설치 훅
+  const { isInstallable, isInstalled, promptInstall, showIOSInstallGuide } = usePWAInstall();
   const lastIssuesRef = useRef([]);  // 이전 프레임 이슈 (중복 카운트 방지)
   const issueStartTimeRef = useRef({});  // 각 이슈별 시작 시간 (일시적 이슈 필터링)
   const postureTimelineRef = useRef([]);  // 자세 타임라인 기록
 
-  // 설정 및 히스토리 로드
+  // 설정 및 히스토리 로드 (초기 hydration - 마운트 시 한 번만 실행)
+   
   useEffect(() => {
     try {
       const saved = localStorage.getItem('postureHistory');
@@ -191,10 +200,11 @@ function App() {
         if (s.sensitivity) setSensitivity(s.sensitivity);
         if (s.alertDelay) setAlertDelay(s.alertDelay);
       }
-    } catch (e) {
+    } catch {
       console.log('Load failed');
     }
   }, []);
+   
 
   // 설정 저장
   const saveSettings = useCallback(() => {
@@ -203,7 +213,7 @@ function App() {
         theme, alertSound, alertVolume, dailyGoal, breakInterval,
         sensitivity, alertDelay
       }));
-    } catch (e) {
+    } catch {
       console.log('Settings save failed');
     }
   }, [theme, alertSound, alertVolume, dailyGoal, breakInterval, sensitivity, alertDelay]);
@@ -228,27 +238,135 @@ function App() {
     setSessionHistory(updated);
     try {
       localStorage.setItem('postureHistory', JSON.stringify(updated));
-    } catch (e) {
+    } catch {
       console.log('History save failed');
     }
   };
 
-  // MediaPipe 초기화
-  useEffect(() => {
-    const initPoseLandmarker = async () => {
+  // 카메라 권한 및 지원 확인
+  const checkCameraSupport = async () => {
+    // mediaDevices API 지원 확인
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      return { supported: false, error: 'NOT_SUPPORTED', message: '이 브라우저는 카메라를 지원하지 않습니다.' };
+    }
+
+    // HTTPS 확인 (localhost 제외)
+    const isSecure = window.location.protocol === 'https:' ||
+                     window.location.hostname === 'localhost' ||
+                     window.location.hostname === '127.0.0.1';
+    if (!isSecure) {
+      return { supported: false, error: 'NOT_SECURE', message: '카메라 사용을 위해 HTTPS 연결이 필요합니다.' };
+    }
+
+    // 권한 상태 확인 (지원하는 브라우저만)
+    if (navigator.permissions && navigator.permissions.query) {
       try {
-        setLoadingProgress('MediaPipe 초기화 중...');
+        const permission = await navigator.permissions.query({ name: 'camera' });
+        if (permission.state === 'denied') {
+          return { supported: false, error: 'PERMISSION_DENIED', message: '카메라 권한이 거부되었습니다. 브라우저 설정에서 권한을 허용해주세요.' };
+        }
+      } catch {
+        // permissions API 미지원 시 무시
+      }
+    }
 
-        const vision = await FilesetResolver.forVisionTasks(
-          'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
-        );
+    return { supported: true };
+  };
 
-        setLoadingProgress('AI 모델 다운로드 중...');
+  // 카메라 스트림 요청 (다양한 옵션 시도)
+  const requestCameraStream = async () => {
+    const constraints = [
+      // 1순위: 이상적인 설정
+      {
+        video: {
+          facingMode: 'user',
+          width: { ideal: 640 },
+          height: { ideal: 480 }
+        }
+      },
+      // 2순위: 단순 전면 카메라
+      {
+        video: {
+          facingMode: 'user'
+        }
+      },
+      // 3순위: 아무 카메라
+      {
+        video: true
+      },
+      // 4순위: 최소 해상도
+      {
+        video: {
+          width: { min: 320 },
+          height: { min: 240 }
+        }
+      }
+    ];
 
-        poseLandmarkerRef.current = await PoseLandmarker.createFromOptions(vision, {
+    let lastError = null;
+
+    for (const constraint of constraints) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia(constraint);
+        return { success: true, stream };
+      } catch (err) {
+        lastError = err;
+        console.warn('카메라 옵션 시도 실패:', constraint, err.name);
+      }
+    }
+
+    // 모든 시도 실패
+    return { success: false, error: lastError };
+  };
+
+  // 카메라 에러 메시지 변환
+  const getCameraErrorMessage = (error) => {
+    if (!error) return '알 수 없는 오류가 발생했습니다.';
+
+    switch (error.name) {
+      case 'NotAllowedError':
+      case 'PermissionDeniedError':
+        return '카메라 권한이 거부되었습니다. 브라우저 설정에서 카메라 권한을 허용해주세요.';
+      case 'NotFoundError':
+      case 'DevicesNotFoundError':
+        return '카메라를 찾을 수 없습니다. 카메라가 연결되어 있는지 확인해주세요.';
+      case 'NotReadableError':
+      case 'TrackStartError':
+        return '카메라가 다른 앱에서 사용 중입니다. 다른 앱을 종료하고 다시 시도해주세요.';
+      case 'OverconstrainedError':
+        return '요청한 카메라 설정을 지원하지 않습니다.';
+      case 'SecurityError':
+        return '보안 오류: HTTPS 연결이 필요합니다.';
+      case 'AbortError':
+        return '카메라 접근이 중단되었습니다.';
+      case 'TypeError':
+        return '잘못된 카메라 설정입니다.';
+      default:
+        return `카메라 오류: ${error.message || error.name || '알 수 없는 오류'}`;
+    }
+  };
+
+  // MediaPipe 초기화 (GPU 실패 시 CPU 폴백)
+  const initMediaPipe = async () => {
+    setLoadingProgress('MediaPipe 초기화 중...');
+
+    const vision = await FilesetResolver.forVisionTasks(
+      'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
+    );
+
+    setLoadingProgress('AI 모델 다운로드 중...');
+
+    // GPU 먼저 시도, 실패하면 CPU로 폴백
+    const delegates = ['GPU', 'CPU'];
+    let lastError = null;
+
+    for (const delegate of delegates) {
+      try {
+        console.log(`MediaPipe ${delegate} 모드 시도...`);
+        const landmarker = await PoseLandmarker.createFromOptions(vision, {
           baseOptions: {
             modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task',
-            delegate: 'GPU'
+            delegate: delegate
           },
           runningMode: 'VIDEO',
           numPoses: 1,
@@ -256,28 +374,53 @@ function App() {
           minPosePresenceConfidence: 0.5,
           minTrackingConfidence: 0.5,
         });
+        console.log(`MediaPipe ${delegate} 모드 성공`);
+        return landmarker;
+      } catch (err) {
+        console.warn(`MediaPipe ${delegate} 모드 실패:`, err);
+        lastError = err;
+      }
+    }
 
+    throw lastError || new Error('MediaPipe 초기화 실패');
+  };
+
+  // MediaPipe 및 카메라 초기화
+  useEffect(() => {
+    const initPoseLandmarker = async () => {
+      try {
+        // 1. 카메라 지원 확인
+        const cameraSupport = await checkCameraSupport();
+        if (!cameraSupport.supported) {
+          setCameraError(cameraSupport.message);
+          setLoadingProgress(cameraSupport.message);
+          setIsLoading(false);
+          return;
+        }
+
+        // 2. MediaPipe 초기화
+        poseLandmarkerRef.current = await initMediaPipe();
+
+        // 3. 카메라 시작
         setLoadingProgress('카메라 시작 중...');
+        const cameraResult = await requestCameraStream();
 
-        // 카메라 자동 시작
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({
-            video: {
-              facingMode: 'user',
-              width: { ideal: 640 },
-              height: { ideal: 480 }
-            }
-          });
-          streamRef.current = stream;
+        if (cameraResult.success) {
+          streamRef.current = cameraResult.stream;
+          setCameraError(null);
           setIsLoading(false);
           setAppState('calibrating');
-        } catch (err) {
-          console.error('카메라 접근 실패:', err);
-          setLoadingProgress('카메라 접근 권한이 필요합니다. 브라우저 설정에서 카메라를 허용해주세요.');
+        } else {
+          const errorMsg = getCameraErrorMessage(cameraResult.error);
+          setCameraError(errorMsg);
+          setLoadingProgress(errorMsg);
+          setIsLoading(false);
         }
       } catch (err) {
-        console.error('MediaPipe 초기화 실패:', err);
-        setLoadingProgress('초기화 실패. 페이지를 새로고침 해주세요.');
+        console.error('초기화 실패:', err);
+        const errorMsg = err.message || '초기화 실패. 페이지를 새로고침 해주세요.';
+        setCameraError(errorMsg);
+        setLoadingProgress(errorMsg);
         setIsLoading(false);
       }
     };
@@ -294,30 +437,31 @@ function App() {
     };
   }, []);
 
-  const startCamera = async () => {
+  // 카메라 재시도
+  const retryCamera = async () => {
+    setCameraError(null);
+    setIsLoading(true);
+    setLoadingProgress('카메라 재시도 중...');
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: 'user',
-          width: { ideal: 640 },
-          height: { ideal: 480 }
-        }
-      });
+      const cameraResult = await requestCameraStream();
 
-      streamRef.current = stream;
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-        setCameraReady(true);
-        return true;
+      if (cameraResult.success) {
+        streamRef.current = cameraResult.stream;
+        setCameraError(null);
+        setIsLoading(false);
+        setAppState('calibrating');
+      } else {
+        const errorMsg = getCameraErrorMessage(cameraResult.error);
+        setCameraError(errorMsg);
+        setLoadingProgress(errorMsg);
+        setIsLoading(false);
       }
-      return false;
     } catch (err) {
-      console.error('카메라 접근 실패:', err);
-      alert('카메라 접근 권한이 필요합니다.');
-      setCameraReady(false);
-      return false;
+      const errorMsg = getCameraErrorMessage(err);
+      setCameraError(errorMsg);
+      setLoadingProgress(errorMsg);
+      setIsLoading(false);
     }
   };
 
@@ -374,9 +518,6 @@ function App() {
     const noEarsVisible = !leftEarVisible && !rightEarVisible;
     const oneEarVisible = (leftEarVisible || rightEarVisible) && !bothEarsVisible;
 
-    // 귀 visibility 차이 (정면이면 비슷해야 함)
-    const earVisibilityDiff = Math.abs(leftEarVis - rightEarVis);
-
     // 눈 visibility
     const leftEyeVis = leftEye?.visibility || 0;
     const rightEyeVis = rightEye?.visibility || 0;
@@ -385,9 +526,6 @@ function App() {
     const bothEyesVisible = leftEyeVisible && rightEyeVisible;
     const noEyesVisible = !leftEyeVisible && !rightEyeVisible;
 
-    // 눈 visibility 차이 (정면이면 비슷해야 함)
-    const eyeVisibilityDiff = Math.abs(leftEyeVis - rightEyeVis);
-
     // 코 visibility
     const noseVis = nose?.visibility || 0;
     const noseVisible = noseVis >= THRESHOLDS.MIN_VISIBILITY;
@@ -395,9 +533,6 @@ function App() {
     // 코와 어깨 중심의 X 차이 (측면이면 코가 한쪽으로 치우침)
     const shoulderCenterX = (leftShoulder.x + rightShoulder.x) / 2;
     const noseOffset = nose ? Math.abs(nose.x - shoulderCenterX) : 0;
-
-    // 어깨 z값 차이 (한쪽이 더 앞에 있으면 대각선)
-    const shoulderZDiff = Math.abs((leftShoulder.z || 0) - (rightShoulder.z || 0));
 
     // ============ 판단 로직 ============
 
@@ -932,21 +1067,6 @@ function App() {
   // 오디오 컨텍스트 (모바일 호환)
   const audioContextRef = useRef(null);
 
-  // 오디오 컨텍스트 초기화 (사용자 상호작용 시 호출)
-  const initAudioContext = useCallback(() => {
-    if (!audioContextRef.current) {
-      try {
-        audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
-      } catch (e) {
-        console.log('AudioContext not supported');
-      }
-    }
-    // 일시 중지 상태면 재개
-    if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
-      audioContextRef.current.resume();
-    }
-  }, []);
-
   // 비프음 재생
   const playBeep = useCallback(() => {
     try {
@@ -972,8 +1092,8 @@ function App() {
 
       oscillator.start(ctx.currentTime);
       oscillator.stop(ctx.currentTime + 0.3);
-    } catch (e) {
-      console.log('Beep failed:', e);
+    } catch (err) {
+      console.log('Beep failed:', err);
     }
   }, []);
 
@@ -1003,7 +1123,7 @@ function App() {
             renotify: true,
             silent: true, // 시스템 알림음 비활성화 (우리 비프음 사용)
           });
-        } catch (e) {
+        } catch {
           // 모바일에서 Notification 실패 무시
         }
       }
@@ -1011,6 +1131,7 @@ function App() {
   }, [alertEnabled, playBeep]);
 
   // 가이드 박스 그리기 - 더 미니멀하고 전문적인 디자인
+  // eslint-disable-next-line no-unused-vars
   const drawGuideBox = (ctx, width, height, angle) => {
     const boxWidth = width * 0.92;
     const boxHeight = height * 0.92;
@@ -1384,7 +1505,7 @@ function App() {
   // 감지 루프 (최적화됨)
   const detectLoop = useCallback(() => {
     if (!poseLandmarkerRef.current || !videoRef.current || !canvasRef.current) {
-      animationFrameRef.current = requestAnimationFrame(detectLoop);
+      animationFrameRef.current = requestAnimationFrame(() => detectLoopRef.current?.());
       return;
     }
 
@@ -1398,14 +1519,14 @@ function App() {
     const ctx = ctxRef.current;
 
     if (video.readyState < 2) {
-      animationFrameRef.current = requestAnimationFrame(detectLoop);
+      animationFrameRef.current = requestAnimationFrame(() => detectLoopRef.current?.());
       return;
     }
 
     // FPS 제한 (15fps)
     const now = performance.now();
     if (now - lastDetectionTimeRef.current < DETECTION_INTERVAL) {
-      animationFrameRef.current = requestAnimationFrame(detectLoop);
+      animationFrameRef.current = requestAnimationFrame(() => detectLoopRef.current?.());
       return;
     }
     lastDetectionTimeRef.current = now;
@@ -1414,7 +1535,7 @@ function App() {
       canvas.width = video.videoWidth || 640;
       canvas.height = video.videoHeight || 480;
       ctxRef.current = null; // 크기 변경 시 컨텍스트 리셋
-      animationFrameRef.current = requestAnimationFrame(detectLoop);
+      animationFrameRef.current = requestAnimationFrame(() => detectLoopRef.current?.());
       return;
     }
 
@@ -1559,8 +1680,14 @@ function App() {
       console.error('감지 오류:', err);
     }
 
-    animationFrameRef.current = requestAnimationFrame(detectLoop);
+    animationFrameRef.current = requestAnimationFrame(() => detectLoopRef.current?.());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sensitivity, alertDelay, triggerAlert]);
+
+  // detectLoop ref 업데이트
+  useEffect(() => {
+    detectLoopRef.current = detectLoop;
+  }, [detectLoop]);
 
   // 앱 시작 시 자동으로 카메라 시작
   useEffect(() => {
@@ -1571,27 +1698,12 @@ function App() {
           await videoRef.current.play();
           setCameraReady(true);
           isMonitoringRef.current = false;
-          animationFrameRef.current = requestAnimationFrame(detectLoop);
+          animationFrameRef.current = requestAnimationFrame(() => detectLoopRef.current?.());
         }
       };
       initCamera();
     }
   }, [isLoading, appState, cameraReady, detectLoop]);
-
-  const startCalibration = async () => {
-    // 모바일 오디오 컨텍스트 초기화 (사용자 상호작용 시점)
-    initAudioContext();
-
-    smoothedLandmarksRef.current = null;
-    cameraAngleRef.current = null;
-    setCameraAngle(null);
-    const success = await startCamera();
-    if (success) {
-      setAppState('calibrating');
-      isMonitoringRef.current = false;
-      animationFrameRef.current = requestAnimationFrame(detectLoop);
-    }
-  };
 
   const completeCalibration = () => {
     if (!smoothedLandmarksRef.current) {
@@ -1855,7 +1967,7 @@ function App() {
         setCameraReady(true);
         isMonitoringRef.current = false;
         setAppState('calibrating');
-        animationFrameRef.current = requestAnimationFrame(detectLoop);
+        animationFrameRef.current = requestAnimationFrame(() => detectLoopRef.current?.());
       }
     } catch (err) {
       console.error('카메라 접근 실패:', err);
@@ -1884,7 +1996,7 @@ function App() {
     }
   };
 
-  const getStatusInfo = () => {
+  const getStatusInfo = useCallback(() => {
     switch (postureStatus) {
       case 'bad':
         return { color: '#EF4444', text: '자세 교정 필요!', emoji: '😣', bgColor: 'rgba(239, 68, 68, 0.2)' };
@@ -1893,7 +2005,7 @@ function App() {
       default:
         return { color: '#22C55E', text: '좋은 자세', emoji: '😊', bgColor: 'rgba(34, 197, 94, 0.2)' };
     }
-  };
+  }, [postureStatus]);
 
   const getAngleEmoji = (angle) => {
     switch (angle) {
@@ -1905,18 +2017,36 @@ function App() {
   };
 
   // 상태 정보 메모이제이션
-  const statusInfo = useMemo(() => getStatusInfo(), [postureStatus]);
+  const statusInfo = useMemo(() => getStatusInfo(), [getStatusInfo]);
 
   // 포맷된 시간 메모이제이션
   const formattedGoodTime = useMemo(() => formatTime(stats.goodTime), [stats.goodTime, formatTime]);
   const formattedBadTime = useMemo(() => formatTime(stats.badTime), [stats.badTime, formatTime]);
 
-  if (isLoading) {
+  if (isLoading || cameraError) {
     return (
       <div className="app">
         <div className="loading-screen">
-          <div className="loading-spinner"></div>
-          <p>{loadingProgress}</p>
+          {isLoading && !cameraError && (
+            <>
+              <div className="loading-spinner"></div>
+              <p>{loadingProgress}</p>
+            </>
+          )}
+          {cameraError && (
+            <>
+              <div className="error-icon">📷</div>
+              <p className="error-message">{cameraError}</p>
+              <button className="retry-btn" onClick={retryCamera}>
+                다시 시도
+              </button>
+              <p className="error-hint">
+                카메라 권한을 확인하고 다시 시도해주세요.
+                <br />
+                Android의 경우 앱 설정에서 카메라 권한을 허용해주세요.
+              </p>
+            </>
+          )}
         </div>
       </div>
     );
@@ -1924,26 +2054,52 @@ function App() {
 
   return (
     <div className="app">
-      <header className="header">
+      {/* PWA 설치 프롬프트 */}
+      {!isInstalled && (
+        <InstallPrompt
+          isInstallable={isInstallable}
+          onInstall={promptInstall}
+          showIOSGuide={showIOSInstallGuide}
+        />
+      )}
+
+      <header className="header" role="banner">
         <h1>자세 교정 알리미</h1>
-        <div className="header-buttons">
-          <button className="settings-btn" onClick={() => setShowStats(true)}>
+        <div className="header-buttons" role="group" aria-label="앱 메뉴">
+          <button
+            className="settings-btn"
+            onClick={() => setShowStats(true)}
+            aria-label="통계 보기"
+            title="통계 보기"
+          >
             📊
           </button>
-          <button className="settings-btn" onClick={() => setShowFullSettings(true)}>
+          <button
+            className="settings-btn"
+            onClick={() => setShowFullSettings(true)}
+            aria-label="설정 열기"
+            title="설정"
+          >
             ⚙️
           </button>
         </div>
       </header>
 
-      <video ref={videoRef} autoPlay playsInline muted className="hidden-video" />
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted
+        className="hidden-video"
+        aria-hidden="true"
+      />
 
-      <main className="main">
+      <main className="main" role="main">
         {appState === 'calibrating' && (
           <>
             <div className="camera-wrapper">
               <div className="camera-container calibration-mode">
-                <canvas ref={canvasRef} className="camera-canvas" />
+                <canvas ref={canvasRef} className="camera-canvas" aria-label="자세 감지 카메라 화면" role="img" />
 
                 {/* 상단 뷰 모드 표시 */}
                 {cameraAngle && (
@@ -1996,7 +2152,7 @@ function App() {
             {/* 카메라 영역 */}
             <div className="camera-wrapper">
               <div className="camera-container" style={{ borderColor: statusInfo.color }}>
-                <canvas ref={canvasRef} className="camera-canvas" />
+                <canvas ref={canvasRef} className="camera-canvas" aria-label="자세 감지 카메라 화면" role="img" />
 
                 <div
                   className="status-indicator"
@@ -2125,17 +2281,27 @@ function App() {
                 </div>
               </div>
 
-              <div className="action-buttons">
-                <button className="action-btn recalibrate" onClick={recalibrate}>
+              <div className="action-buttons" role="group" aria-label="모니터링 제어">
+                <button
+                  className="action-btn recalibrate"
+                  onClick={recalibrate}
+                  aria-label="기준 자세 재설정"
+                >
                   재설정
                 </button>
-                <button className="action-btn stop" onClick={stopMonitoring}>
+                <button
+                  className="action-btn stop"
+                  onClick={stopMonitoring}
+                  aria-label="모니터링 중지"
+                >
                   중지
                 </button>
                 <button
                   className={`action-btn debug ${showDebug ? 'active' : ''}`}
                   onClick={() => setShowDebug(!showDebug)}
                   title="수치 표시"
+                  aria-label={showDebug ? '디버그 정보 숨기기' : '디버그 정보 표시'}
+                  aria-pressed={showDebug}
                 >
                   {showDebug ? '📊' : '📈'}
                 </button>
@@ -2252,11 +2418,23 @@ function App() {
 
         {/* 히스토리 모달 */}
         {showHistory && (
-          <div className="modal-backdrop" onClick={() => setShowHistory(false)}>
+          <div
+            className="modal-backdrop"
+            onClick={() => setShowHistory(false)}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="history-modal-title"
+          >
             <div className="modal history-modal" onClick={e => e.stopPropagation()}>
               <div className="modal-header">
-                <h2>세션 기록</h2>
-                <button className="close-btn" onClick={() => setShowHistory(false)}>✕</button>
+                <h2 id="history-modal-title">세션 기록</h2>
+                <button
+                  className="close-btn"
+                  onClick={() => setShowHistory(false)}
+                  aria-label="세션 기록 닫기"
+                >
+                  ✕
+                </button>
               </div>
 
               <div className="history-list">
@@ -2376,11 +2554,23 @@ function App() {
 
       {/* 전체 설정 모달 */}
       {showFullSettings && (
-        <div className="modal-backdrop" onClick={() => setShowFullSettings(false)}>
+        <div
+          className="modal-backdrop"
+          onClick={() => setShowFullSettings(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="settings-modal-title"
+        >
           <div className="modal full-settings-modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <h2>설정</h2>
-              <button className="close-btn" onClick={() => setShowFullSettings(false)}>✕</button>
+              <h2 id="settings-modal-title">설정</h2>
+              <button
+                className="close-btn"
+                onClick={() => setShowFullSettings(false)}
+                aria-label="설정 닫기"
+              >
+                ✕
+              </button>
             </div>
 
             {/* 테마 설정 */}
@@ -2519,10 +2709,16 @@ function App() {
 
       {/* 휴식 알림 모달 */}
       {showBreakReminder && (
-        <div className="modal-backdrop" onClick={() => setShowBreakReminder(false)}>
+        <div
+          className="modal-backdrop"
+          onClick={() => setShowBreakReminder(false)}
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="break-reminder-title"
+        >
           <div className="modal break-reminder-modal" onClick={e => e.stopPropagation()}>
-            <div className="break-icon">☕</div>
-            <h2>휴식 시간!</h2>
+            <div className="break-icon" aria-hidden="true">☕</div>
+            <h2 id="break-reminder-title">휴식 시간!</h2>
             <p className="break-message">
               {breakInterval}분 동안 열심히 하셨어요.<br />
               잠시 일어나서 스트레칭을 해보세요.
@@ -2545,11 +2741,23 @@ function App() {
 
       {/* 통계 대시보드 모달 */}
       {showStats && (
-        <div className="modal-backdrop" onClick={() => setShowStats(false)}>
+        <div
+          className="modal-backdrop"
+          onClick={() => setShowStats(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="stats-modal-title"
+        >
           <div className="modal stats-dashboard" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <h2>통계</h2>
-              <button className="close-btn" onClick={() => setShowStats(false)}>✕</button>
+              <h2 id="stats-modal-title">통계</h2>
+              <button
+                className="close-btn"
+                onClick={() => setShowStats(false)}
+                aria-label="통계 닫기"
+              >
+                ✕
+              </button>
             </div>
 
             {/* 요약 카드 */}

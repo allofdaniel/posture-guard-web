@@ -4,6 +4,16 @@ import react from '@vitejs/plugin-react'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  test: {
+    globals: true,
+    environment: 'jsdom',
+    setupFiles: './src/test/setup.js',
+    css: true,
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'json', 'html'],
+    },
+  },
   build: {
     // 프로덕션 빌드 최적화
     minify: 'terser',
@@ -30,8 +40,15 @@ export default defineConfig({
         chunkFileNames: 'assets/[hash].js',
         entryFileNames: 'assets/[hash].js',
         assetFileNames: 'assets/[hash].[ext]',
-        manualChunks: {
-          vendor: ['react', 'react-dom']
+manualChunks: (id) => {
+          if (id.includes('node_modules')) {
+            if (id.includes('@mediapipe')) {
+              return 'mediapipe';
+            }
+            if (id.includes('react')) {
+              return 'vendor';
+            }
+          }
         }
       }
     },
