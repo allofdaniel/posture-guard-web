@@ -99,7 +99,7 @@ body {
 
 .calibration-view-badge {
   position: absolute;
-  top: 12px;
+  top: 90px;
   left: 12px;
   display: flex;
   align-items: center;
@@ -181,7 +181,7 @@ body {
 /* 기존 캘리브레이션 스타일 (호환성) */
 .calibration-overlay {
   position: absolute;
-  top: 12px;
+  top: 90px;
   left: 50%;
   transform: translateX(-50%);
   background-color: rgba(34, 197, 94, 0.9);
@@ -328,7 +328,7 @@ body {
 /* Status Indicator */
 .status-indicator {
   position: absolute;
-  top: 12px;
+  top: 90px;
   left: 12px;
   display: flex;
   align-items: center;
@@ -456,7 +456,7 @@ body {
 /* View Mode Badge */
 .view-mode-badge {
   position: absolute;
-  top: 12px;
+  top: 90px;
   right: 12px;
   background-color: rgba(99, 102, 241, 0.9);
   color: white;
@@ -469,7 +469,7 @@ body {
 /* 제스처 표시기 */
 .gesture-indicator {
   position: absolute;
-  top: 12px;
+  top: 90px;
   left: 12px;
   background-color: rgba(30, 41, 59, 0.85);
   color: #94A3B8;

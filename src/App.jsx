@@ -4,42 +4,6 @@ import { usePWAInstall } from './hooks';
 import { InstallPrompt } from './components';
 import './App.css';
 
-// 런타임 보호 (개발자 도구 감지)
-(() => {
-  const _0x1 = () => {
-    const _0x2 = /./;
-    _0x2.toString = () => { window.location.href = 'about:blank'; return ''; };
-    console.log('%c', _0x2);
-  };
-
-  // 디버거 감지
-  const _0x3 = () => {
-    const start = performance.now();
-    // eslint-disable-next-line no-debugger
-    debugger;
-    if (performance.now() - start > 100) {
-      document.body.innerHTML = '';
-    }
-  };
-
-  // 우클릭 방지
-  document.addEventListener('contextmenu', e => e.preventDefault());
-
-  // 키보드 단축키 방지 (F12, Ctrl+Shift+I 등)
-  document.addEventListener('keydown', e => {
-    if (e.key === 'F12' ||
-        (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'J' || e.key === 'C')) ||
-        (e.ctrlKey && e.key === 'U')) {
-      e.preventDefault();
-    }
-  });
-
-  if (typeof window !== 'undefined' && window.location.hostname !== 'localhost') {
-    setInterval(_0x1, 1000);
-    setInterval(_0x3, 3000);
-  }
-})();
-
 // 성능 설정
 const DETECTION_FPS = 15; // 감지 FPS (60 -> 15로 감소)
 const DETECTION_INTERVAL = 1000 / DETECTION_FPS;
@@ -67,7 +31,7 @@ const LANDMARKS = {
   RIGHT_HIP: 24,
 };
 
-const SMOOTHING_FACTOR = 0.6;
+const SMOOTHING_FACTOR = 0.85; // 높을수록 더 부드러움
 
 // 카메라 각도: 'front' (정면), 'side' (측면), 'diagonal' (정측면/대각선), 'back' (후면)
 // 각 각도별 임계값
@@ -1273,7 +1237,7 @@ function App() {
     ctx.setLineDash([]);
   };
 
-  // 자세 그리기
+  // 자세 그리기 - 강한 블러 글로우 효과 (퍼지는 색상)
   const drawPoseSilhouette = (ctx, landmarks, width, height, status, angle) => {
     const getPoint = (index) => {
       const lm = landmarks[index];
@@ -1281,10 +1245,14 @@ function App() {
       return { x: lm.x * width, y: lm.y * height, z: lm.z, v: lm.visibility };
     };
 
-    const color = status === 'bad' ? '#EF4444' :
-                  status === 'warning' ? '#FBBF24' : '#22C55E';
-    const fillColor = status === 'bad' ? 'rgba(239, 68, 68, 0.15)' :
-                      status === 'warning' ? 'rgba(251, 191, 36, 0.15)' : 'rgba(34, 197, 94, 0.15)';
+    // 상태별 색상 - 글로우 효과용
+    const glowColor = status === 'bad' ? '#EF4444' :
+                      status === 'warning' ? '#FBBF24' : '#00DCFF';
+    // 더 투명하게 해서 블러가 퍼지는 느낌
+    const color = status === 'bad' ? 'rgba(239, 68, 68, 0.6)' :
+                  status === 'warning' ? 'rgba(251, 191, 36, 0.6)' : 'rgba(0, 220, 255, 0.6)';
+    const fillColor = status === 'bad' ? 'rgba(239, 68, 68, 0.2)' :
+                      status === 'warning' ? 'rgba(251, 191, 36, 0.2)' : 'rgba(0, 220, 255, 0.2)';
 
     const nose = getPoint(LANDMARKS.NOSE);
     const leftEye = getPoint(LANDMARKS.LEFT_EYE);
@@ -1300,6 +1268,12 @@ function App() {
 
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
+
+    // 강한 블러 글로우 - 여러 레이어로 퍼지는 효과
+    ctx.shadowColor = glowColor;
+    ctx.shadowBlur = 80; // 매우 강한 블러
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
 
     if (angle === 'side') {
       // 측면 뷰 그리기
@@ -1320,49 +1294,54 @@ function App() {
       }
 
       if (headCenter) {
+        // 머리 - 더 두꺼운 선과 강한 글로우
         ctx.beginPath();
-        ctx.arc(headCenter.x, headCenter.y, headRadius, 0, 2 * Math.PI);
+        ctx.arc(headCenter.x, headCenter.y, headRadius + 10, 0, 2 * Math.PI);
         ctx.fillStyle = fillColor;
         ctx.fill();
         ctx.strokeStyle = color;
-        ctx.lineWidth = 3;
+        ctx.lineWidth = 20;
         ctx.stroke();
 
+        // 목 - 두꺼운 선
         ctx.beginPath();
         ctx.moveTo(headCenter.x, headCenter.y + headRadius * 0.8);
         ctx.lineTo(shoulder.x, shoulder.y);
         ctx.strokeStyle = color;
-        ctx.lineWidth = 12;
+        ctx.lineWidth = 30;
         ctx.stroke();
       }
 
       if (hip) {
+        // 몸통 - 매우 두꺼운 선
         ctx.beginPath();
         ctx.moveTo(shoulder.x, shoulder.y);
         ctx.lineTo(hip.x, hip.y);
         ctx.strokeStyle = color;
-        ctx.lineWidth = 16;
+        ctx.lineWidth = 40;
         ctx.stroke();
       } else {
         ctx.beginPath();
         ctx.moveTo(shoulder.x, shoulder.y);
         ctx.lineTo(shoulder.x, Math.min(height * 0.9, shoulder.y + 150));
         ctx.strokeStyle = color;
-        ctx.lineWidth = 16;
+        ctx.lineWidth = 40;
         ctx.stroke();
       }
 
       if (elbow) {
+        // 팔 - 두꺼운 선
         ctx.beginPath();
         ctx.moveTo(shoulder.x, shoulder.y);
         ctx.lineTo(elbow.x, elbow.y);
         ctx.strokeStyle = color;
-        ctx.lineWidth = 8;
+        ctx.lineWidth = 25;
         ctx.stroke();
       }
 
+      // 어깨 관절
       ctx.beginPath();
-      ctx.arc(shoulder.x, shoulder.y, 10, 0, 2 * Math.PI);
+      ctx.arc(shoulder.x, shoulder.y, 20, 0, 2 * Math.PI);
       ctx.fillStyle = color;
       ctx.fill();
 
@@ -1404,53 +1383,55 @@ function App() {
       }
 
       if (headCenter) {
+        // 머리 - 더 크고 두꺼운 글로우
         ctx.beginPath();
-        ctx.ellipse(headCenter.x, headCenter.y, headRadius * 0.75, headRadius * 0.9, 0, 0, 2 * Math.PI);
+        ctx.ellipse(headCenter.x, headCenter.y, headRadius * 0.9, headRadius * 1.1, 0, 0, 2 * Math.PI);
         ctx.fillStyle = fillColor;
         ctx.fill();
         ctx.strokeStyle = color;
-        ctx.lineWidth = 3;
+        ctx.lineWidth = 20;
         ctx.stroke();
 
+        // 목 - 두꺼운 선
         ctx.beginPath();
         ctx.moveTo(headCenter.x, headCenter.y + headRadius * 0.7);
         ctx.lineTo(shoulderCenter.x, shoulderCenter.y);
         ctx.strokeStyle = color;
-        ctx.lineWidth = shoulderWidth * 0.1;
+        ctx.lineWidth = shoulderWidth * 0.25;
         ctx.stroke();
       }
 
-      // 상체
+      // 상체 - 더 넓고 두꺼운 글로우
       if (hasLeft && hasRight) {
-        const bodyBottom = Math.min(height * 0.95, shoulderCenter.y + shoulderWidth * 0.7);
+        const bodyBottom = Math.min(height * 0.95, shoulderCenter.y + shoulderWidth * 0.8);
 
         ctx.beginPath();
-        ctx.moveTo(leftShoulder.x - shoulderWidth * 0.08, leftShoulder.y);
+        ctx.moveTo(leftShoulder.x - shoulderWidth * 0.15, leftShoulder.y);
         ctx.quadraticCurveTo(
-          leftShoulder.x - shoulderWidth * 0.1,
+          leftShoulder.x - shoulderWidth * 0.18,
           leftShoulder.y + (bodyBottom - leftShoulder.y) * 0.5,
-          leftShoulder.x,
+          leftShoulder.x - shoulderWidth * 0.05,
           bodyBottom
         );
-        ctx.lineTo(rightShoulder.x, bodyBottom);
+        ctx.lineTo(rightShoulder.x + shoulderWidth * 0.05, bodyBottom);
         ctx.quadraticCurveTo(
-          rightShoulder.x + shoulderWidth * 0.1,
+          rightShoulder.x + shoulderWidth * 0.18,
           rightShoulder.y + (bodyBottom - rightShoulder.y) * 0.5,
-          rightShoulder.x + shoulderWidth * 0.08,
+          rightShoulder.x + shoulderWidth * 0.15,
           rightShoulder.y
         );
-        ctx.lineTo(leftShoulder.x - shoulderWidth * 0.08, leftShoulder.y);
+        ctx.lineTo(leftShoulder.x - shoulderWidth * 0.15, leftShoulder.y);
         ctx.closePath();
 
         ctx.fillStyle = fillColor;
         ctx.fill();
         ctx.strokeStyle = color;
-        ctx.lineWidth = 3;
+        ctx.lineWidth = 25;
         ctx.stroke();
       }
 
-      // 팔
-      const armWidth = shoulderWidth * 0.06;
+      // 팔 - 두꺼운 선
+      const armWidth = shoulderWidth * 0.18;
       if (leftElbow && leftShoulder) {
         ctx.beginPath();
         ctx.moveTo(leftShoulder.x, leftShoulder.y);
@@ -1468,16 +1449,16 @@ function App() {
         ctx.stroke();
       }
 
-      // 어깨 점
+      // 어깨 점 - 더 큰 원
       ctx.fillStyle = color;
       if (leftShoulder) {
         ctx.beginPath();
-        ctx.arc(leftShoulder.x, leftShoulder.y, 8, 0, 2 * Math.PI);
+        ctx.arc(leftShoulder.x, leftShoulder.y, 18, 0, 2 * Math.PI);
         ctx.fill();
       }
       if (rightShoulder) {
         ctx.beginPath();
-        ctx.arc(rightShoulder.x, rightShoulder.y, 8, 0, 2 * Math.PI);
+        ctx.arc(rightShoulder.x, rightShoulder.y, 18, 0, 2 * Math.PI);
         ctx.fill();
       }
     }
