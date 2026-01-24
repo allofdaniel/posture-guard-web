@@ -8,3 +8,7 @@ export { default as BreakReminderModal } from './BreakReminderModal';
 export { default as SessionResult } from './SessionResult';
 export { default as ErrorBoundary } from './ErrorBoundary';
 export { default as InstallPrompt } from './InstallPrompt';
+export { default as CalibrationView } from './CalibrationView';
+export { default as MonitoringView } from './MonitoringView';
+export { default as PostureScore } from './PostureScore';
+export { default as PostureMetrics } from './PostureMetrics';
