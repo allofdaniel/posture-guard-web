@@ -2,8 +2,22 @@
 <html lang="ko">
   <head>
     <meta charset="UTF-8" />
+    <!-- Content Security Policy -->
+    <meta http-equiv="Content-Security-Policy" content="
+      default-src 'self';
+      script-src 'self' https://cdn.jsdelivr.net;
+      style-src 'self' 'unsafe-inline';
+      img-src 'self' data: blob:;
+      media-src 'self' blob:;
+      connect-src 'self' ws: wss: https://cdn.jsdelivr.net https://storage.googleapis.com;
+      worker-src 'self' blob:;
+      font-src 'self';
+      base-uri 'self';
+      form-action 'self';
+      upgrade-insecure-requests;
+    " />
     <link rel="icon" type="image/png" href="/icon-192.png" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#6366F1" />
     <meta name="description" content="AI 기반 실시간 자세 모니터링 앱" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -16,19 +30,6 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
-    <script>
-      // Service Worker 등록
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js')
-            .then(registration => {
-              console.log('SW registered:', registration);
-            })
-            .catch(error => {
-              console.log('SW registration failed:', error);
-            });
-        });
-      }
-    </script>
+    <script src="/register-sw.js"></script>
   </body>
 </html>

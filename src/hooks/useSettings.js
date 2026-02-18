@@ -1,16 +1,9 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { loadSettings, saveSettings } from '../utils/storage';
+import { DEFAULT_SETTINGS } from '../constants';
 
-const DEFAULT_SETTINGS = {
-  theme: 'dark',
-  alertSound: 'beep',
-  alertVolume: 0.5,
-  dailyGoal: 80,
-  breakInterval: 30,
-  sensitivity: 1.0,
-  alertDelay: 3,
-  alertEnabled: true,
-};
+// Debounce delay for localStorage writes (ms)
+const SAVE_DEBOUNCE_MS = 500;
 
 const getInitialSettings = () => {
   const saved = loadSettings();
@@ -19,11 +12,43 @@ const getInitialSettings = () => {
 
 export function useSettings() {
   const [settings, setSettings] = useState(getInitialSettings);
+  const saveTimeoutRef = useRef(null);
+  const settingsRef = useRef(settings);
 
-  // Save settings when changed
+  // Keep settingsRef in sync
   useEffect(() => {
-    saveSettings(settings);
+    settingsRef.current = settings;
   }, [settings]);
+
+  // Debounced save settings when changed
+  useEffect(() => {
+    // Clear any pending save
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+
+    // Schedule new save
+    saveTimeoutRef.current = setTimeout(() => {
+      saveSettings(settings);
+    }, SAVE_DEBOUNCE_MS);
+
+    // Cleanup on unmount or settings change
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, [settings]);
+
+  // Save immediately on unmount to prevent data loss
+  useEffect(() => {
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+        saveSettings(settingsRef.current);
+      }
+    };
+  }, []);
 
   // Apply theme
   useEffect(() => {

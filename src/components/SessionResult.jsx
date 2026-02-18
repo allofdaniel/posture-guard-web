@@ -1,4 +1,5 @@
 import { memo } from 'react';
+import PropTypes from 'prop-types';
 import { formatTime, formatDuration, formatTimeOnly } from '../utils/format';
 
 const SessionResult = memo(function SessionResult({
@@ -122,5 +123,21 @@ const SessionResult = memo(function SessionResult({
     </div>
   );
 });
+
+SessionResult.propTypes = {
+  result: PropTypes.shape({
+    goodPercentage: PropTypes.number,
+    goodTime: PropTypes.number,
+    badTime: PropTypes.number,
+    duration: PropTypes.number,
+    alerts: PropTypes.number,
+    issueCount: PropTypes.object,
+    timeline: PropTypes.array,
+    startTime: PropTypes.string,
+    timestamp: PropTypes.string,
+  }),
+  onNewSession: PropTypes.func.isRequired,
+  onShowHistory: PropTypes.func.isRequired,
+};
 
 export default SessionResult;

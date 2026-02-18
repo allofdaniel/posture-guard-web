@@ -6,8 +6,8 @@ export const initAudioContext = () => {
   if (!audioContext) {
     try {
       audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    } catch {
-      console.log('AudioContext not supported');
+    } catch (error) {
+      console.warn('AudioContext not supported:', error.message);
     }
   }
   // 일시 중지 상태면 재개
@@ -54,19 +54,43 @@ export const vibrate = (pattern = [200, 100, 200]) => {
   }
 };
 
-// 브라우저 알림
+// 브라우저 알림 (워치 미러링 지원)
 export const showNotification = (title, options = {}) => {
   if ('Notification' in window && Notification.permission === 'granted') {
     try {
+      // silent: false로 설정해야 워치로 알림이 전달됨
       new Notification(title, {
         icon: '/favicon.ico',
         tag: 'posture-alert',
         renotify: true,
-        silent: true,
+        silent: false, // 워치 알림을 위해 false로 변경
+        vibrate: [200, 100, 200], // 진동 패턴 (워치에서 진동)
+        badge: '/icon-192.png',
         ...options,
       });
-    } catch {
-      // 모바일에서 Notification 실패 무시
+    } catch (error) {
+      // 모바일에서 Notification 실패 시 (일부 환경에서 지원 안됨)
+      console.debug('Notification failed:', error.message);
+    }
+  }
+};
+
+// 워치 전용 알림 (강한 진동)
+export const showWatchNotification = (title, body = '') => {
+  if ('Notification' in window && Notification.permission === 'granted') {
+    try {
+      new Notification(title, {
+        body,
+        icon: '/icon-192.png',
+        badge: '/icon-192.png',
+        tag: 'posture-watch-alert',
+        renotify: true,
+        silent: false,
+        vibrate: [300, 100, 300, 100, 300], // 강한 진동 패턴
+        requireInteraction: false,
+      });
+    } catch (error) {
+      console.debug('Watch notification failed:', error.message);
     }
   }
 };

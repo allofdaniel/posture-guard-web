@@ -1,4 +1,5 @@
 import { memo } from 'react';
+import PropTypes from 'prop-types';
 import Modal from './Modal';
 
 const BreakReminderModal = memo(function BreakReminderModal({
@@ -9,7 +10,7 @@ const BreakReminderModal = memo(function BreakReminderModal({
   if (!isOpen) return null;
 
   return (
-    <Modal onClose={onClose} className="break-reminder-modal">
+    <Modal onClose={onClose} className="break-reminder-modal" title="휴식 시간">
       <div className="break-icon" aria-hidden="true">☕</div>
       <h2>휴식 시간!</h2>
       <p className="break-message">
@@ -25,5 +26,11 @@ const BreakReminderModal = memo(function BreakReminderModal({
     </Modal>
   );
 });
+
+BreakReminderModal.propTypes = {
+  isOpen: PropTypes.bool.isRequired,
+  onClose: PropTypes.func.isRequired,
+  breakInterval: PropTypes.number,
+};
 
 export default BreakReminderModal;

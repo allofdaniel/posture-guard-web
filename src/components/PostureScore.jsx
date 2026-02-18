@@ -1,4 +1,5 @@
 import { memo, useMemo } from 'react';
+import PropTypes from 'prop-types';
 
 const PostureScore = memo(function PostureScore({ status, debugInfo }) {
   // Calculate score based on current posture status and debug info
@@ -48,5 +49,10 @@ const PostureScore = memo(function PostureScore({ status, debugInfo }) {
     </div>
   );
 });
+
+PostureScore.propTypes = {
+  status: PropTypes.oneOf(['good', 'warning', 'bad']),
+  debugInfo: PropTypes.object,
+};
 
 export default PostureScore;

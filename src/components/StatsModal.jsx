@@ -1,4 +1,5 @@
 import { memo, useMemo, useState } from 'react';
+import PropTypes from 'prop-types';
 import Modal, { ModalHeader } from './Modal';
 
 const formatDuration = (seconds) => {
@@ -113,12 +114,17 @@ const StatsModal = memo(function StatsModal({
     };
   }, [history]);
 
+  const safeDailyGoal = Number.isFinite(dailyGoal) && dailyGoal > 0 ? dailyGoal : 0;
+  const goalProgress = safeDailyGoal === 0
+    ? 0
+    : Math.max(0, Math.min(100, (stats.avgScore / safeDailyGoal) * 100));
+
   if (!isOpen) return null;
 
   const chartData = viewMode === 'weekly' ? stats.weeklyData : stats.dailyData;
 
   return (
-    <Modal onClose={onClose} className="stats-dashboard">
+    <Modal onClose={onClose} className="stats-dashboard" title="통계 대시보드">
       <ModalHeader title="통계 대시보드" onClose={onClose} />
 
       {/* Summary Cards */}
@@ -250,9 +256,9 @@ const StatsModal = memo(function StatsModal({
         <div className="goal-progress-bar">
           <div
             className={`goal-progress-fill ${stats.avgScore >= dailyGoal ? 'achieved' : ''}`}
-            style={{ width: `${Math.min(100, (stats.avgScore / dailyGoal) * 100)}%` }}
+            style={{ width: `${goalProgress}%` }}
           />
-          <div className="goal-marker" style={{ left: `${dailyGoal}%` }} />
+          <div className="goal-marker" style={{ left: `${Math.max(0, Math.min(100, dailyGoal))}%` }} />
         </div>
         <div className="goal-status">
           {stats.avgScore >= dailyGoal
@@ -280,5 +286,12 @@ const StatsModal = memo(function StatsModal({
     </Modal>
   );
 });
+
+StatsModal.propTypes = {
+  isOpen: PropTypes.bool.isRequired,
+  onClose: PropTypes.func.isRequired,
+  history: PropTypes.array,
+  dailyGoal: PropTypes.number,
+};
 
 export default StatsModal;

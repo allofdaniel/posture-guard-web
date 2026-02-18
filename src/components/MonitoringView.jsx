@@ -1,5 +1,7 @@
 import { memo, useMemo, useCallback } from 'react';
+import PropTypes from 'prop-types';
 import { VIEW_MODE_LABELS } from '../constants';
+import { formatTime } from '../utils/format';
 import PostureScore from './PostureScore';
 import PostureMetrics from './PostureMetrics';
 
@@ -21,13 +23,6 @@ const getStatusInfo = (postureStatus) => {
     default:
       return { color: '#22C55E', text: '좋은 자세', emoji: '😊', bgColor: 'rgba(34, 197, 94, 0.15)', statusClass: 'good' };
   }
-};
-
-const formatTime = (ticks) => {
-  const seconds = Math.floor(ticks / 10);
-  const mins = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return `${mins}:${secs.toString().padStart(2, '0')}`;
 };
 
 
@@ -194,5 +189,28 @@ const MonitoringView = memo(function MonitoringView({
     </>
   );
 });
+
+MonitoringView.propTypes = {
+  canvasRef: PropTypes.shape({ current: PropTypes.instanceOf(Element) }),
+  postureStatus: PropTypes.oneOf(['good', 'warning', 'bad']),
+  postureIssues: PropTypes.arrayOf(PropTypes.string),
+  calibratedPose: PropTypes.object,
+  stats: PropTypes.shape({
+    goodTime: PropTypes.number,
+    badTime: PropTypes.number,
+    alerts: PropTypes.number,
+  }),
+  showDebug: PropTypes.bool,
+  debugInfo: PropTypes.object,
+  sensitivity: PropTypes.number,
+  alertDelay: PropTypes.number,
+  alertEnabled: PropTypes.bool,
+  onSensitivityChange: PropTypes.func.isRequired,
+  onAlertDelayChange: PropTypes.func.isRequired,
+  onAlertEnabledChange: PropTypes.func.isRequired,
+  onRecalibrate: PropTypes.func.isRequired,
+  onStop: PropTypes.func.isRequired,
+  onToggleDebug: PropTypes.func.isRequired,
+};
 
 export default MonitoringView;

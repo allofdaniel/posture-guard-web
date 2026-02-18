@@ -1,4 +1,5 @@
 import { memo } from 'react';
+import PropTypes from 'prop-types';
 import Modal, { ModalHeader } from './Modal';
 import { formatDuration, formatDate } from '../utils/format';
 
@@ -17,7 +18,7 @@ const HistoryModal = memo(function HistoryModal({
   };
 
   return (
-    <Modal onClose={onClose} className="history-modal">
+    <Modal onClose={onClose} className="history-modal" title="세션 기록">
       <ModalHeader title="세션 기록" onClose={onClose} />
 
       <div className="history-list">
@@ -58,5 +59,18 @@ const HistoryModal = memo(function HistoryModal({
     </Modal>
   );
 });
+
+HistoryModal.propTypes = {
+  isOpen: PropTypes.bool.isRequired,
+  onClose: PropTypes.func.isRequired,
+  history: PropTypes.arrayOf(PropTypes.shape({
+    id: PropTypes.number,
+    date: PropTypes.string,
+    goodPercentage: PropTypes.number,
+    duration: PropTypes.number,
+    timeline: PropTypes.array,
+  })),
+  onClearHistory: PropTypes.func.isRequired,
+};
 
 export default HistoryModal;

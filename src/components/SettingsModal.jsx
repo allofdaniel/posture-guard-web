@@ -1,11 +1,13 @@
 import { memo } from 'react';
+import PropTypes from 'prop-types';
 import Modal, { ModalHeader } from './Modal';
 
 const SettingsModal = memo(function SettingsModal({
   isOpen,
   onClose,
   settings,
-  onSettingsChange
+  onSettingsChange,
+  watchConnection
 }) {
   if (!isOpen) return null;
 
@@ -24,7 +26,7 @@ const SettingsModal = memo(function SettingsModal({
   };
 
   return (
-    <Modal onClose={onClose} className="full-settings-modal">
+    <Modal onClose={onClose} className="full-settings-modal" title="설정">
       <ModalHeader title="설정" onClose={onClose} />
 
       {/* 테마 설정 */}
@@ -157,11 +159,61 @@ const SettingsModal = memo(function SettingsModal({
         </div>
       </div>
 
+      {/* 워치 연결 설정 */}
+      {watchConnection && (
+        <div className="settings-section">
+          <div className="settings-section-title">⌚ Wear OS 워치</div>
+          <div className="settings-row">
+            <span className="settings-label">상태</span>
+            <span className={`watch-status ${watchConnection.isConnected ? 'connected' : ''}`}>
+              {watchConnection.isConnected
+                ? `연결됨 (워치 ${watchConnection.watchCount}대)`
+                : '연결 안됨'}
+            </span>
+          </div>
+          <div className="settings-row">
+            <span className="settings-label">서버 연결</span>
+            <button
+              className={`watch-btn ${watchConnection.isConnected ? 'disconnect' : 'connect'}`}
+              onClick={watchConnection.isConnected ? watchConnection.onDisconnect : watchConnection.onConnect}
+            >
+              {watchConnection.isConnected ? '연결 해제' : '연결'}
+            </button>
+          </div>
+          <div className="settings-info">
+            💡 워치와 폰이 같은 WiFi에 연결되어 있어야 합니다.
+            <br />
+            PC에서 relay 서버를 실행해주세요.
+          </div>
+        </div>
+      )}
+
       <button className="modal-btn primary full" onClick={onClose}>
         닫기
       </button>
     </Modal>
   );
 });
+
+SettingsModal.propTypes = {
+  isOpen: PropTypes.bool.isRequired,
+  onClose: PropTypes.func.isRequired,
+  settings: PropTypes.shape({
+    theme: PropTypes.string,
+    alertSound: PropTypes.string,
+    alertVolume: PropTypes.number,
+    dailyGoal: PropTypes.number,
+    breakInterval: PropTypes.number,
+    sensitivity: PropTypes.number,
+    alertDelay: PropTypes.number,
+  }).isRequired,
+  onSettingsChange: PropTypes.func.isRequired,
+  watchConnection: PropTypes.shape({
+    isConnected: PropTypes.bool,
+    watchCount: PropTypes.number,
+    onConnect: PropTypes.func,
+    onDisconnect: PropTypes.func,
+  }),
+};
 
 export default SettingsModal;

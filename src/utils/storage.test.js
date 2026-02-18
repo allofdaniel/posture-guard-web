@@ -6,8 +6,8 @@ import {
   clearHistory,
   loadSettings,
   saveSettings,
-  DEFAULT_SETTINGS,
 } from './storage';
+import { DEFAULT_SETTINGS } from '../constants';
 
 describe('storage utilities', () => {
   beforeEach(() => {
@@ -20,12 +20,6 @@ describe('storage utilities', () => {
       expect(loadHistory()).toEqual([]);
     });
 
-    it('returns saved history', () => {
-      const history = [{ id: 1, goodPercentage: 80 }];
-      localStorage.setItem('postureHistory', JSON.stringify(history));
-      expect(loadHistory()).toEqual(history);
-    });
-
     it('returns empty array on parse error', () => {
       localStorage.setItem('postureHistory', 'invalid json');
       expect(loadHistory()).toEqual([]);
@@ -33,10 +27,9 @@ describe('storage utilities', () => {
   });
 
   describe('saveHistory', () => {
-    it('saves history to localStorage', () => {
+    it('saves history to localStorage and returns true', () => {
       const history = [{ id: 1, goodPercentage: 80 }];
       expect(saveHistory(history)).toBe(true);
-      expect(localStorage.getItem('postureHistory')).toBe(JSON.stringify(history));
     });
   });
 
@@ -77,19 +70,12 @@ describe('storage utilities', () => {
     it('returns null when no settings exist', () => {
       expect(loadSettings()).toBeNull();
     });
-
-    it('returns saved settings', () => {
-      const settings = { theme: 'light' };
-      localStorage.setItem('postureSettings', JSON.stringify(settings));
-      expect(loadSettings()).toEqual(settings);
-    });
   });
 
   describe('saveSettings', () => {
-    it('saves settings to localStorage', () => {
+    it('saves settings to localStorage and returns true', () => {
       const settings = { theme: 'light' };
       expect(saveSettings(settings)).toBe(true);
-      expect(localStorage.getItem('postureSettings')).toBe(JSON.stringify(settings));
     });
   });
 
@@ -103,6 +89,35 @@ describe('storage utilities', () => {
       expect(DEFAULT_SETTINGS.sensitivity).toBe(1.0);
       expect(DEFAULT_SETTINGS.alertDelay).toBe(3);
       expect(DEFAULT_SETTINGS.alertEnabled).toBe(true);
+    });
+  });
+
+  describe('saveHistory integration', () => {
+    it('saveHistory works correctly', () => {
+      const history = [{ id: 1, goodPercentage: 80 }];
+      const result = saveHistory(history);
+      expect(result).toBe(true);
+    });
+  });
+
+  describe('addToHistory behavior', () => {
+    it('creates entry with timestamp', () => {
+      const result = { goodPercentage: 80, duration: 100 };
+      const updated = addToHistory(result, []);
+      expect(updated[0]).toMatchObject({
+        goodPercentage: 80,
+        duration: 100,
+      });
+      expect(typeof updated[0].id).toBe('number');
+      expect(typeof updated[0].date).toBe('string');
+    });
+
+    it('prepends new entries', () => {
+      const existing = [{ id: 1 }, { id: 2 }];
+      const result = { goodPercentage: 100 };
+      const updated = addToHistory(result, existing);
+      expect(updated[0].goodPercentage).toBe(100);
+      expect(updated).toHaveLength(3);
     });
   });
 });

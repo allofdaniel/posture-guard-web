@@ -1,4 +1,5 @@
 import { memo, useMemo } from 'react';
+import PropTypes from 'prop-types';
 
 const PostureMetrics = memo(function PostureMetrics({ debugInfo, calibratedPose }) {
   const metrics = useMemo(() => {
@@ -87,5 +88,12 @@ const PostureMetrics = memo(function PostureMetrics({ debugInfo, calibratedPose 
     </div>
   );
 });
+
+PostureMetrics.propTypes = {
+  debugInfo: PropTypes.object,
+  calibratedPose: PropTypes.shape({
+    viewMode: PropTypes.string,
+  }),
+};
 
 export default PostureMetrics;

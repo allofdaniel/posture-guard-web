@@ -1,0 +1,12 @@
+{
+  "name": "posture-guard-relay",
+  "version": "1.0.0",
+  "description": "WebSocket relay server for Posture Guard PWA and Wear OS",
+  "main": "websocket-relay.js",
+  "scripts": {
+    "start": "node websocket-relay.js"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  }
+}

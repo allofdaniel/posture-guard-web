@@ -69,4 +69,26 @@ export const VIEW_MODE_LABELS = {
 // 성능 설정
 export const DETECTION_FPS = 15;
 export const DETECTION_INTERVAL = 1000 / DETECTION_FPS;
-export const SMOOTHING_FACTOR = 0.6;
+
+// 랜드마크 스무딩 (postureAnalysis.js에서 사용)
+export const SMOOTHING_FACTOR = 0.85;
+
+// 기본 설정
+export const DEFAULT_SETTINGS = {
+  theme: 'dark',
+  alertSound: 'beep',
+  alertVolume: 0.5,
+  dailyGoal: 80,
+  breakInterval: 30,
+  sensitivity: 1.0,
+  alertDelay: 3,
+  alertEnabled: true,
+};
+
+// 앱 상수
+export const MAX_HISTORY_ENTRIES = 30;
+export const ALERT_COOLDOWN_MS = 3000;
+export const ISSUE_MIN_DURATION_MS = 1000;
+export const STATS_UPDATE_INTERVAL = 3; // frames
+export const TIMELINE_UPDATE_INTERVAL = 30; // frames
+export const MAX_TIMELINE_ENTRIES = 360;

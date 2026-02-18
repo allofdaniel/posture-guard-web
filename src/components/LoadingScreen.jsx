@@ -1,4 +1,5 @@
 import { memo } from 'react';
+import PropTypes from 'prop-types';
 
 const LoadingScreen = memo(function LoadingScreen({
   isLoading,
@@ -33,5 +34,12 @@ const LoadingScreen = memo(function LoadingScreen({
     </div>
   );
 });
+
+LoadingScreen.propTypes = {
+  isLoading: PropTypes.bool,
+  loadingProgress: PropTypes.string,
+  cameraError: PropTypes.string,
+  onRetry: PropTypes.func.isRequired,
+};
 
 export default LoadingScreen;

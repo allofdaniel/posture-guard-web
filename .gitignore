@@ -25,3 +25,35 @@ dist-ssr
 
 .vercel
 .claude/
+
+# Test images and screenshots
+*.png
+!public/*.png
+!src/assets/*.png
+
+# Android build artifacts
+*.apk
+*.aab
+*.apks
+*.jar
+apks-extracted/
+
+# Build and coverage
+coverage/
+nul
+
+# Playwright
+test-results/
+playwright-report/
+playwright/.cache/
+
+# Stitch project files
+.stitch-project.json
+stitch_settings/
+.playwright-mcp/
+
+# Misc
+plan.md
+*.xml
+resize_image.ps1
+posture-guard-v1.5.0.zip

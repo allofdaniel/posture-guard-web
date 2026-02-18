@@ -1,4 +1,5 @@
 import { memo, useState } from 'react';
+import PropTypes from 'prop-types';
 
 const InstallPrompt = memo(function InstallPrompt({
   isInstallable,
@@ -60,5 +61,11 @@ const InstallPrompt = memo(function InstallPrompt({
 
   return null;
 });
+
+InstallPrompt.propTypes = {
+  isInstallable: PropTypes.bool,
+  onInstall: PropTypes.func,
+  showIOSGuide: PropTypes.bool,
+};
 
 export default InstallPrompt;

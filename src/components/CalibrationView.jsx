@@ -1,4 +1,5 @@
 import { memo, useState, useEffect, useRef } from 'react';
+import PropTypes from 'prop-types';
 import { VIEW_MODE_LABELS } from '../constants';
 
 const getAngleEmoji = (angle) => {
@@ -168,5 +169,12 @@ const CalibrationView = memo(function CalibrationView({
     </>
   );
 });
+
+CalibrationView.propTypes = {
+  canvasRef: PropTypes.shape({ current: PropTypes.instanceOf(Element) }),
+  cameraAngle: PropTypes.oneOf(['front', 'side', 'diagonal', 'back']),
+  poseInGuide: PropTypes.bool,
+  onCalibrate: PropTypes.func.isRequired,
+};
 
 export default CalibrationView;

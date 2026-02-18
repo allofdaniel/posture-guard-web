@@ -1,6 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { PoseLandmarker, FilesetResolver } from '@mediapipe/tasks-vision';
-import { usePWAInstall, useSettings } from './hooks';
+import {
+  usePWAInstall,
+  useSettings,
+  useMediaPipe,
+  usePostureDetection,
+  useSessionManager,
+} from './hooks';
+import { useWatchConnection } from './hooks/useWatchConnection';
 import {
   LoadingScreen,
   InstallPrompt,
@@ -12,66 +18,25 @@ import {
   StatsModal,
   BreakReminderModal,
 } from './components';
+import { LANDMARKS } from './constants';
 import {
-  LANDMARKS,
-  DETECTION_INTERVAL,
-} from './constants';
-import {
-  checkCameraSupport,
-  requestCameraStream,
-  getCameraErrorMessage,
   playBeep,
   vibrate,
   showNotification,
   requestNotificationPermission,
-  loadHistory,
-  saveHistory,
 } from './utils';
-import {
-  smoothLandmarks,
-  detectCameraAngle,
-  analyzePosture,
-  isLandmarkValid,
-} from './utils/postureAnalysis';
-import {
-  drawGuideBox,
-  drawCalibrationSilhouette,
-  drawPoseSilhouette,
-  checkPoseInGuide,
-} from './utils/canvasDrawing';
+import { isLandmarkValid } from './utils/postureAnalysis';
 import './App.css';
 
 function App() {
-  // Refs
+  // Refs for video and canvas elements
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
-  const poseLandmarkerRef = useRef(null);
-  const animationFrameRef = useRef(null);
-  const streamRef = useRef(null);
-  const smoothedLandmarksRef = useRef(null);
   const calibratedPoseRef = useRef(null);
   const isMonitoringRef = useRef(false);
-  const guideBoxRef = useRef(null);
-  const cameraAngleRef = useRef(null);
-  const lastDetectionTimeRef = useRef(0);
-  const ctxRef = useRef(null);
-  const lastStatusRef = useRef('good');
-  const lastIssuesStrRef = useRef('');
-  const detectLoopRef = useRef(null);
-  const lastAlertTime = useRef(0);
-  const badPostureStartRef = useRef(null);
-  const frameCountRef = useRef(0);
-  const breakTimerRef = useRef(null);
-  const sessionStartTimeRef = useRef(null);
-  const lastIssuesRef = useRef([]);
-  const issueStartTimeRef = useRef({});
-  const postureTimelineRef = useRef([]);
 
   // App State
   const [appState, setAppState] = useState('loading');
-  const [isLoading, setIsLoading] = useState(true);
-  const [loadingProgress, setLoadingProgress] = useState('AI 모델 로딩 중...');
-  const [cameraError, setCameraError] = useState(null);
   const [cameraReady, setCameraReady] = useState(false);
 
   // Posture State
@@ -82,7 +47,14 @@ function App() {
   const [cameraAngle, setCameraAngle] = useState(null);
   const [debugInfo, setDebugInfo] = useState(null);
 
-  // Settings (consolidated into useSettings hook)
+  // UI State
+  const [showDebug, setShowDebug] = useState(false);
+  const [showFullSettings, setShowFullSettings] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [showStats, setShowStats] = useState(false);
+  const [showBreakReminder, setShowBreakReminder] = useState(false);
+
+  // Custom Hooks
   const {
     settings,
     updateSettings,
@@ -92,296 +64,113 @@ function App() {
   } = useSettings();
   const { sensitivity, alertEnabled, alertDelay, dailyGoal, breakInterval } = settings;
 
-  // UI State
-  const [showDebug, setShowDebug] = useState(false);
-  const [showFullSettings, setShowFullSettings] = useState(false);
-  const [showHistory, setShowHistory] = useState(false);
-  const [showStats, setShowStats] = useState(false);
-  const [showBreakReminder, setShowBreakReminder] = useState(false);
-
-  // Session State
-  const [stats, setStats] = useState({ goodTime: 0, badTime: 0, alerts: 0, issueCount: {} });
-  const [sessionResult, setSessionResult] = useState(null);
-  const [sessionHistory, setSessionHistory] = useState(() => loadHistory());
-
-  // PWA
   const { isInstallable, isInstalled, promptInstall, showIOSInstallGuide } = usePWAInstall();
 
-  // MediaPipe initialization
-  const initMediaPipe = async () => {
-    setLoadingProgress('MediaPipe 초기화 중...');
-    const vision = await FilesetResolver.forVisionTasks(
-      'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
-    );
-    setLoadingProgress('AI 모델 다운로드 중...');
+  // Watch connection for Wear OS
+  const {
+    isConnected: isWatchConnected,
+    watchCount,
+    connect: connectWatch,
+    disconnect: disconnectWatch,
+    sendVibration: sendWatchVibration,
+  } = useWatchConnection();
 
-    const delegates = ['GPU', 'CPU'];
-    for (const delegate of delegates) {
-      try {
-        return await PoseLandmarker.createFromOptions(vision, {
-          baseOptions: {
-            modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task',
-            delegate
-          },
-          runningMode: 'VIDEO',
-          numPoses: 1,
-          minPoseDetectionConfidence: 0.5,
-          minPosePresenceConfidence: 0.5,
-          minTrackingConfidence: 0.5,
-        });
-      } catch {
-        // Continue to next delegate
-      }
-    }
-    throw new Error('MediaPipe 초기화 실패');
-  };
+  const {
+    poseLandmarkerRef,
+    streamRef,
+    isLoading,
+    loadingProgress,
+    cameraError,
+    isReady: mediaPipeReady,
+    retryCamera,
+    stopCamera,
+    restartCamera,
+  } = useMediaPipe();
 
-  // Initialize camera and MediaPipe
-  useEffect(() => {
-    const init = async () => {
-      try {
-        const cameraSupport = await checkCameraSupport();
-        if (!cameraSupport.supported) {
-          setCameraError(cameraSupport.message);
-          setIsLoading(false);
-          return;
-        }
-
-        poseLandmarkerRef.current = await initMediaPipe();
-
-        setLoadingProgress('카메라 시작 중...');
-        const cameraResult = await requestCameraStream();
-
-        if (cameraResult.success) {
-          streamRef.current = cameraResult.stream;
-          setCameraError(null);
-          setIsLoading(false);
-          setAppState('calibrating');
-        } else {
-          setCameraError(getCameraErrorMessage(cameraResult.error));
-          setIsLoading(false);
-        }
-      } catch (err) {
-        setCameraError(err.message || '초기화 실패');
-        setIsLoading(false);
-      }
-    };
-
-    init();
-
-    return () => {
-      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
-      if (streamRef.current) streamRef.current.getTracks().forEach(track => track.stop());
-      if (breakTimerRef.current) clearInterval(breakTimerRef.current);
-    };
-  }, []);
-
-  // Retry camera
-  const retryCamera = async () => {
-    setCameraError(null);
-    setIsLoading(true);
-    setLoadingProgress('카메라 재시도 중...');
-
-    try {
-      const cameraResult = await requestCameraStream();
-      if (cameraResult.success) {
-        streamRef.current = cameraResult.stream;
-        setCameraError(null);
-        setIsLoading(false);
-        setAppState('calibrating');
-      } else {
-        setCameraError(getCameraErrorMessage(cameraResult.error));
-        setIsLoading(false);
-      }
-    } catch (err) {
-      setCameraError(getCameraErrorMessage(err));
-      setIsLoading(false);
-    }
-  };
+  const {
+    stats,
+    sessionResult,
+    sessionHistory,
+    updateStats,
+    incrementAlerts,
+    startSession,
+    endSession,
+    resetStats,
+    clearSessionResult,
+    clearHistory,
+    cleanup: cleanupSession,
+  } = useSessionManager();
 
   // Trigger alert
   const triggerAlert = useCallback(() => {
-    const now = Date.now();
-    if (now - lastAlertTime.current < 3000) return;
-
-    lastAlertTime.current = now;
-    setStats(prev => ({ ...prev, alerts: prev.alerts + 1 }));
+    const shouldAlert = incrementAlerts();
+    if (!shouldAlert) return;
 
     if (alertEnabled) {
       vibrate();
       playBeep();
       showNotification('자세 교정 알림', { body: '자세를 바르게 해주세요!' });
-    }
-  }, [alertEnabled]);
 
-  // Detection loop
-  const detectLoop = useCallback(() => {
-    if (!poseLandmarkerRef.current || !videoRef.current || !canvasRef.current) {
-      animationFrameRef.current = requestAnimationFrame(() => detectLoopRef.current?.());
-      return;
-    }
-
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-
-    if (!ctxRef.current) {
-      ctxRef.current = canvas.getContext('2d', { alpha: false });
-    }
-    const ctx = ctxRef.current;
-
-    if (video.readyState < 2) {
-      animationFrameRef.current = requestAnimationFrame(() => detectLoopRef.current?.());
-      return;
-    }
-
-    const now = performance.now();
-    if (now - lastDetectionTimeRef.current < DETECTION_INTERVAL) {
-      animationFrameRef.current = requestAnimationFrame(() => detectLoopRef.current?.());
-      return;
-    }
-    lastDetectionTimeRef.current = now;
-
-    if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
-      canvas.width = video.videoWidth || 640;
-      canvas.height = video.videoHeight || 480;
-      ctxRef.current = null;
-      animationFrameRef.current = requestAnimationFrame(() => detectLoopRef.current?.());
-      return;
-    }
-
-    try {
-      const results = poseLandmarkerRef.current.detectForVideo(video, now);
-
-      ctx.save();
-      ctx.scale(-1, 1);
-      ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
-      ctx.restore();
-
-      const calibrated = calibratedPoseRef.current;
-      const isMonitoring = isMonitoringRef.current;
-
-      if (results.landmarks && results.landmarks.length > 0) {
-        smoothedLandmarksRef.current = smoothLandmarks(results.landmarks[0], smoothedLandmarksRef.current);
-        const mirrored = smoothedLandmarksRef.current.map(lm => ({ ...lm, x: 1 - lm.x }));
-
-        if (isMonitoring && calibrated) {
-          const { status, issues, debug } = analyzePosture(smoothedLandmarksRef.current, calibrated, sensitivity, cameraAngleRef.current);
-
-          if (status !== 'good') {
-            drawCalibrationSilhouette(ctx, calibrated, canvas.width, canvas.height);
-          }
-          drawPoseSilhouette(ctx, mirrored, canvas.width, canvas.height, status, cameraAngleRef.current);
-
-          if (lastStatusRef.current !== status) {
-            lastStatusRef.current = status;
-            setPostureStatus(status);
-          }
-
-          const issuesStr = issues.join(',');
-          if (lastIssuesStrRef.current !== issuesStr) {
-            lastIssuesStrRef.current = issuesStr;
-            setPostureIssues(issues);
-            setDebugInfo(debug);
-          }
-
-          frameCountRef.current++;
-          if (frameCountRef.current % 3 === 0) {
-            const currentTime = Date.now();
-            const ISSUE_MIN_DURATION = 1000;
-
-            issues.forEach(issue => {
-              if (!issueStartTimeRef.current[issue]) {
-                issueStartTimeRef.current[issue] = currentTime;
-              }
-            });
-
-            Object.keys(issueStartTimeRef.current).forEach(issue => {
-              if (!issues.includes(issue)) delete issueStartTimeRef.current[issue];
-            });
-
-            const persistentNewIssues = issues.filter(issue => {
-              const startTime = issueStartTimeRef.current[issue];
-              return startTime && (currentTime - startTime >= ISSUE_MIN_DURATION) && !lastIssuesRef.current.includes(issue);
-            });
-
-            setStats(prev => {
-              const updatedIssueCount = { ...prev.issueCount };
-              persistentNewIssues.forEach(issue => {
-                updatedIssueCount[issue] = (updatedIssueCount[issue] || 0) + 1;
-              });
-              return {
-                ...prev,
-                goodTime: status === 'good' ? prev.goodTime + 1 : prev.goodTime,
-                badTime: status !== 'good' ? prev.badTime + 1 : prev.badTime,
-                issueCount: updatedIssueCount,
-              };
-            });
-
-            lastIssuesRef.current = issues.filter(issue => {
-              const startTime = issueStartTimeRef.current[issue];
-              return startTime && (currentTime - startTime >= ISSUE_MIN_DURATION);
-            });
-          }
-
-          if (frameCountRef.current % 30 === 0) {
-            postureTimelineRef.current.push({ time: Date.now(), status, issues: [...issues] });
-            if (postureTimelineRef.current.length > 360) postureTimelineRef.current.shift();
-          }
-
-          if (status !== 'good') {
-            if (!badPostureStartRef.current) {
-              badPostureStartRef.current = Date.now();
-            } else if ((Date.now() - badPostureStartRef.current) / 1000 >= alertDelay) {
-              triggerAlert();
-              badPostureStartRef.current = Date.now();
-            }
-          } else {
-            badPostureStartRef.current = null;
-          }
-        } else {
-          const detectedAngle = detectCameraAngle(mirrored);
-          if (cameraAngleRef.current !== detectedAngle) {
-            cameraAngleRef.current = detectedAngle;
-            setCameraAngle(detectedAngle);
-          }
-
-          drawGuideBox(ctx, canvas.width, canvas.height, guideBoxRef);
-          const inGuide = checkPoseInGuide(mirrored, canvas.width, canvas.height, guideBoxRef.current);
-          setPoseInGuide(inGuide);
-          drawPoseSilhouette(ctx, mirrored, canvas.width, canvas.height, inGuide ? 'good' : 'warning', detectedAngle);
-        }
-      } else {
-        if (!isMonitoring) {
-          drawGuideBox(ctx, canvas.width, canvas.height, guideBoxRef);
-        }
-        setPoseInGuide(false);
+      // 워치에 진동 전송
+      if (isWatchConnected) {
+        sendWatchVibration({ pattern: 'medium', intensity: 255 });
       }
-    } catch {
-      // Silent error handling
     }
+  }, [alertEnabled, incrementAlerts, isWatchConnected, sendWatchVibration]);
 
-    animationFrameRef.current = requestAnimationFrame(() => detectLoopRef.current?.());
-  }, [sensitivity, alertDelay, triggerAlert]);
+  // Posture Detection Hook
+  const {
+    smoothedLandmarksRef,
+    cameraAngleRef,
+    startDetection,
+    stopDetection,
+    resetDetection,
+    getTimeline,
+  } = usePostureDetection({
+    videoRef,
+    canvasRef,
+    poseLandmarkerRef,
+    calibratedPoseRef,
+    isMonitoringRef,
+    sensitivity,
+    alertDelay,
+    onPostureChange: ({ status, issues, debug }) => {
+      setPostureStatus(status);
+      setPostureIssues(issues);
+      setDebugInfo(debug);
+    },
+    onStatsUpdate: updateStats,
+    onTriggerAlert: triggerAlert,
+    onCameraAngleChange: setCameraAngle,
+    onPoseInGuideChange: setPoseInGuide,
+  });
 
+  // Initialize app and camera when MediaPipe is ready
   useEffect(() => {
-    detectLoopRef.current = detectLoop;
-  }, [detectLoop]);
+    if (!mediaPipeReady || cameraReady) return;
 
-  // Start camera when ready
+    const initCamera = async () => {
+      if (videoRef.current && streamRef.current) {
+        videoRef.current.srcObject = streamRef.current;
+        await videoRef.current.play();
+        setCameraReady(true);
+        isMonitoringRef.current = false;
+        setAppState('calibrating');
+        startDetection();
+      }
+    };
+
+    initCamera();
+  }, [mediaPipeReady, cameraReady, streamRef, startDetection]);
+
+  // Cleanup on unmount
   useEffect(() => {
-    if (!isLoading && appState === 'calibrating' && streamRef.current && !cameraReady) {
-      const initCamera = async () => {
-        if (videoRef.current && streamRef.current) {
-          videoRef.current.srcObject = streamRef.current;
-          await videoRef.current.play();
-          setCameraReady(true);
-          isMonitoringRef.current = false;
-          animationFrameRef.current = requestAnimationFrame(() => detectLoopRef.current?.());
-        }
-      };
-      initCamera();
-    }
-  }, [isLoading, appState, cameraReady]);
+    return () => {
+      stopDetection();
+      disconnectWatch();
+      cleanupSession();
+    };
+  }, [stopDetection, disconnectWatch, cleanupSession]);
 
   // Complete calibration
   const completeCalibration = useCallback(() => {
@@ -462,70 +251,29 @@ function App() {
     calibratedPoseRef.current = newCalibration;
     setCalibratedPose(newCalibration);
     isMonitoringRef.current = true;
-    badPostureStartRef.current = null;
-    frameCountRef.current = 0;
-    sessionStartTimeRef.current = Date.now();
     setAppState('monitoring');
 
-    if (breakTimerRef.current) clearInterval(breakTimerRef.current);
-    if (breakInterval > 0) {
-      breakTimerRef.current = setInterval(() => {
-        setShowBreakReminder(true);
-        playBeep();
-      }, breakInterval * 60 * 1000);
-    }
+    startSession(breakInterval, () => {
+      setShowBreakReminder(true);
+      playBeep();
+    });
 
     requestNotificationPermission();
-  }, [poseInGuide, breakInterval]);
+  }, [poseInGuide, breakInterval, smoothedLandmarksRef, cameraAngleRef, startSession]);
 
   // Stop monitoring
   const stopMonitoring = useCallback(() => {
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current);
-      animationFrameRef.current = null;
-    }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
-    }
-    if (breakTimerRef.current) {
-      clearInterval(breakTimerRef.current);
-      breakTimerRef.current = null;
-    }
+    stopDetection();
+    stopCamera();
 
-    const sessionDuration = sessionStartTimeRef.current
-      ? Math.floor((Date.now() - sessionStartTimeRef.current) / 1000) : 0;
-    const totalTicks = stats.goodTime + stats.badTime;
-    const goodPercentage = totalTicks > 0 ? Math.round((stats.goodTime / totalTicks) * 100) : 0;
+    const result = endSession(calibratedPose, getTimeline());
 
-    const result = {
-      duration: sessionDuration,
-      goodTime: stats.goodTime,
-      badTime: stats.badTime,
-      alerts: stats.alerts,
-      goodPercentage,
-      issueCount: { ...stats.issueCount },
-      viewMode: calibratedPose?.viewMode || 'front',
-      timestamp: new Date().toISOString(),
-      startTime: sessionStartTimeRef.current ? new Date(sessionStartTimeRef.current).toISOString() : null,
-      timeline: [...postureTimelineRef.current],
-    };
-
-    setSessionResult(result);
-
-    const newEntry = { id: Date.now(), date: new Date().toISOString(), ...result };
-    const updated = [newEntry, ...sessionHistory].slice(0, 30);
-    setSessionHistory(updated);
-    saveHistory(updated);
-
-    postureTimelineRef.current = [];
-    smoothedLandmarksRef.current = null;
+    // Reset refs
     calibratedPoseRef.current = null;
     isMonitoringRef.current = false;
-    guideBoxRef.current = null;
-    cameraAngleRef.current = null;
-    sessionStartTimeRef.current = null;
+    resetDetection();
 
+    // Reset state
     setCalibratedPose(null);
     setPostureStatus('good');
     setPostureIssues([]);
@@ -533,51 +281,45 @@ function App() {
     setAppState('result');
     setPoseInGuide(false);
     setCameraAngle(null);
-  }, [stats, calibratedPose, sessionHistory]);
+
+    return result;
+  }, [calibratedPose, stopDetection, stopCamera, endSession, getTimeline, resetDetection]);
 
   // Recalibrate
   const recalibrate = useCallback(() => {
-    smoothedLandmarksRef.current = null;
     calibratedPoseRef.current = null;
     isMonitoringRef.current = false;
-    cameraAngleRef.current = null;
-    lastIssuesRef.current = [];
-    issueStartTimeRef.current = {};
+    resetDetection();
 
     setCalibratedPose(null);
     setAppState('calibrating');
     setPoseInGuide(false);
-    setStats({ goodTime: 0, badTime: 0, alerts: 0, issueCount: {} });
     setCameraAngle(null);
-  }, []);
+    resetStats();
+  }, [resetDetection, resetStats]);
 
   // Start new session
   const startNewSession = useCallback(async () => {
-    setSessionResult(null);
-    setStats({ goodTime: 0, badTime: 0, alerts: 0, issueCount: {} });
-    lastIssuesRef.current = [];
-    issueStartTimeRef.current = {};
+    clearSessionResult();
+    resetStats();
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }
-      });
-      streamRef.current = stream;
-
-      if (videoRef.current) {
+      const stream = await restartCamera();
+      if (videoRef.current && stream) {
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
         setCameraReady(true);
         isMonitoringRef.current = false;
         setAppState('calibrating');
-        animationFrameRef.current = requestAnimationFrame(() => detectLoopRef.current?.());
+        startDetection();
       }
-    } catch {
+    } catch (error) {
+      console.error('Failed to start new session:', error);
       alert('카메라 접근 권한이 필요합니다.');
     }
-  }, []);
+  }, [clearSessionResult, resetStats, restartCamera, startDetection]);
 
-  // Settings change handler (uses updateSettings from useSettings hook)
+  // Settings change handler
   const handleSettingsChange = useCallback((newSettings) => {
     updateSettings(newSettings);
   }, [updateSettings]);
@@ -648,7 +390,7 @@ function App() {
         {appState === 'result' && sessionResult && (
           <SessionResult
             result={sessionResult}
-            onStartNew={startNewSession}
+            onNewSession={startNewSession}
             onShowHistory={() => setShowHistory(true)}
           />
         )}
@@ -658,10 +400,7 @@ function App() {
         isOpen={showHistory}
         onClose={() => setShowHistory(false)}
         history={sessionHistory}
-        onClear={() => {
-          setSessionHistory([]);
-          saveHistory([]);
-        }}
+        onClearHistory={clearHistory}
       />
 
       <SettingsModal
@@ -669,6 +408,12 @@ function App() {
         onClose={() => setShowFullSettings(false)}
         settings={settings}
         onSettingsChange={handleSettingsChange}
+        watchConnection={{
+          isConnected: isWatchConnected,
+          watchCount,
+          onConnect: connectWatch,
+          onDisconnect: disconnectWatch,
+        }}
       />
 
       <StatsModal

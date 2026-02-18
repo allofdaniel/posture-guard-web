@@ -1,6 +1,4 @@
-import { LANDMARKS, THRESHOLDS } from '../constants';
-
-const SMOOTHING_FACTOR = 0.85;
+import { LANDMARKS, THRESHOLDS, SMOOTHING_FACTOR } from '../constants';
 
 // Check if landmark is valid
 export const isLandmarkValid = (lm) => {

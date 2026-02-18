@@ -20,8 +20,9 @@ export const checkCameraSupport = async () => {
       if (permission.state === 'denied') {
         return { supported: false, error: 'PERMISSION_DENIED', message: '카메라 권한이 거부되었습니다. 브라우저 설정에서 권한을 허용해주세요.' };
       }
-    } catch {
-      // permissions API 미지원 시 무시
+    } catch (error) {
+      // permissions API 미지원 시 무시 (일부 브라우저에서 발생)
+      console.debug('Permissions API not supported:', error.message);
     }
   }
 
